@@ -104,7 +104,7 @@ namespace ホ号計画
                 // 心拍モードの場合は周波数範囲を調整
                 if (_currentMode == ModeSelectionForm.AnalysisMode.Heart)
                 {
-                    SetNumericValueProgrammatically(freqMaxNumeric, 20); // 心拍解析は通常20Hzまで
+                    SetFreqNumericFromHz(freqMaxNumeric, 20.0); // 心拍解析は通常20Hzまで
                 }
 
                 // 補間設定をUIに反映
@@ -166,11 +166,22 @@ namespace ホ号計画
                 // 軸範囲設定
                 timeMinNum.Value = (decimal)_viewModel.AnalysisSettings.MinTime;
                 timeMaxNum.Value = (decimal)_viewModel.AnalysisSettings.MaxTime;
-                freqMinNum.Value = (decimal)_viewModel.AnalysisSettings.DisplayMinFreq;
-                freqMaxNum.Value = (decimal)_viewModel.AnalysisSettings.DisplayMaxFreq;
+                // 対数スケール時は指数表示に変換
+                if (_viewModel.IsLogScale)
+                {
+                    double minHz = Math.Max(_viewModel.AnalysisSettings.DisplayMinFreq, 0.001);
+                    double maxHz = Math.Max(_viewModel.AnalysisSettings.DisplayMaxFreq, 0.001);
+                    freqMinNum.Value = (decimal)Math.Round(Math.Log10(minHz), 1);
+                    freqMaxNum.Value = (decimal)Math.Round(Math.Log10(maxHz), 1);
+                }
+                else
+                {
+                    freqMinNum.Value = (decimal)_viewModel.AnalysisSettings.DisplayMinFreq;
+                    freqMaxNum.Value = (decimal)_viewModel.AnalysisSettings.DisplayMaxFreq;
+                }
 
                 // デバッグ出力
-                System.Diagnostics.Debug.WriteLine($"UI更新: 時間軸={timeMinNum.Value}-{timeMaxNum.Value}, 周波数軸={freqMinNum.Value}-{freqMaxNum.Value}");
+                System.Diagnostics.Debug.WriteLine($"UI更新: 時間軸={timeMinNum.Value}-{timeMaxNum.Value}, 周波数軸={freqMinNum.Value}-{freqMaxNum.Value} (LogScale={_viewModel.IsLogScale})");
             }
             finally
             {
@@ -463,8 +474,18 @@ namespace ホ号計画
                 // 共通コントロールから値を取得
                 double timeMin = (double)timeMinNumeric.Value;
                 double timeMax = (double)timeMaxNumeric.Value;
-                double freqMin = (double)freqMinNumeric.Value;
-                double freqMax = (double)freqMaxNumeric.Value;
+                double freqMin, freqMax;
+                if (_viewModel.IsLogScale)
+                {
+                    // 指数モード: 10^n → Hz に変換
+                    freqMin = Math.Pow(10, (double)freqMinNumeric.Value);
+                    freqMax = Math.Pow(10, (double)freqMaxNumeric.Value);
+                }
+                else
+                {
+                    freqMin = (double)freqMinNumeric.Value;
+                    freqMax = (double)freqMaxNumeric.Value;
+                }
 
                 _viewModel.UpdateAxisRangesFromUI(timeMin, timeMax, freqMin, freqMax);
 
@@ -1578,7 +1599,92 @@ namespace ホ号計画
         {
             if (sender is CheckBox checkBox && _viewModel != null)
             {
-                _viewModel.IsLogScale = checkBox.Checked;
+                bool isLog = checkBox.Checked;
+
+                // まずViewModelの対数スケール設定を更新（軸の再構築）
+                _viewModel.IsLogScale = isLog;
+
+                // NumericUpDownの表示モードを切替（Hz ↔ 10^n 指数）
+                SwitchFreqNumericMode(isLog);
+            }
+        }
+
+        /// <summary>
+        /// 周波数範囲NumericUpDownの表示モードをHz/指数で切り替える
+        /// </summary>
+        private void SwitchFreqNumericMode(bool isLog)
+        {
+            freqMinNumeric.ValueChanged -= AxisRange_ValueChanged;
+            freqMaxNumeric.ValueChanged -= AxisRange_ValueChanged;
+
+            try
+            {
+                double minHz = _viewModel.AnalysisSettings.DisplayMinFreq;
+                double maxHz = _viewModel.AnalysisSettings.DisplayMaxFreq;
+
+                if (isLog)
+                {
+                    // 指数モード: Minimum を先に広げてから Value を設定
+                    freqMinNumeric.Minimum = -3m;
+                    freqMinNumeric.Maximum = 5m;
+                    freqMaxNumeric.Minimum = -3m;
+                    freqMaxNumeric.Maximum = 5m;
+
+                    freqMinNumeric.DecimalPlaces = 1;
+                    freqMinNumeric.Increment = 0.5m;
+                    freqMaxNumeric.DecimalPlaces = 1;
+                    freqMaxNumeric.Increment = 0.5m;
+
+                    decimal minExp = (decimal)Math.Round(Math.Log10(Math.Max(minHz, 0.001)), 1);
+                    decimal maxExp = (decimal)Math.Round(Math.Log10(Math.Max(maxHz, 0.001)), 1);
+                    freqMinNumeric.Value = Math.Max(freqMinNumeric.Minimum, Math.Min(freqMinNumeric.Maximum, minExp));
+                    freqMaxNumeric.Value = Math.Max(freqMaxNumeric.Minimum, Math.Min(freqMaxNumeric.Maximum, maxExp));
+
+                    freqRangeLabel.Text = "周波数範囲(10^n)";
+                }
+                else
+                {
+                    // Hzモード: Maximum を先に広げてから Value → Minimum の順
+                    freqMaxNumeric.Maximum = 1000m;
+                    freqMinNumeric.Maximum = 1000m;
+
+                    decimal minVal = (decimal)Math.Max(0, Math.Min(1000, Math.Round(minHz, 1)));
+                    decimal maxVal = (decimal)Math.Max(0, Math.Min(1000, Math.Round(maxHz, 1)));
+                    freqMinNumeric.Value = minVal;
+                    freqMaxNumeric.Value = maxVal;
+
+                    freqMinNumeric.Minimum = 0m;
+                    freqMaxNumeric.Minimum = 0m;
+                    freqMinNumeric.DecimalPlaces = 1;
+                    freqMinNumeric.Increment = 0.1m;
+                    freqMaxNumeric.DecimalPlaces = 1;
+                    freqMaxNumeric.Increment = 1m;
+
+                    freqRangeLabel.Text = "周波数範囲(Hz)";
+                }
+            }
+            finally
+            {
+                freqMinNumeric.ValueChanged += AxisRange_ValueChanged;
+                freqMaxNumeric.ValueChanged += AxisRange_ValueChanged;
+            }
+        }
+
+        /// <summary>
+        /// Hz値から周波数NumericUpDownを設定（対数モード時は自動で指数に変換）
+        /// </summary>
+        private void SetFreqNumericFromHz(NumericUpDown control, double hzValue)
+        {
+            if (_viewModel?.IsLogScale == true)
+            {
+                decimal exponent = (decimal)Math.Round(Math.Log10(Math.Max(hzValue, 0.001)), 1);
+                exponent = Math.Max(control.Minimum, Math.Min(control.Maximum, exponent));
+                SetNumericValueProgrammatically(control, exponent);
+            }
+            else
+            {
+                decimal val = (decimal)Math.Max((double)control.Minimum, Math.Min((double)control.Maximum, hzValue));
+                SetNumericValueProgrammatically(control, val);
             }
         }
 
@@ -1672,13 +1778,9 @@ namespace ホ号計画
                 {
                     timeMinNumeric.Value = (decimal)settings.MinTime;
                     timeMaxNumeric.Value = (decimal)settings.MaxTime;
-                    freqMinNumeric.Value = (decimal)settings.DisplayMinFreq;
-                    freqMaxNumeric.Value = (decimal)settings.DisplayMaxFreq;
+                    SetFreqNumericFromHz(freqMinNumeric, settings.DisplayMinFreq);
+                    SetFreqNumericFromHz(freqMaxNumeric, settings.DisplayMaxFreq);
 
-                    // DFT時間幅の設定は廃止（BasicTimeUnitを使用）
-                    // eegWindowDurationNumeric.Value = (decimal)(settings.WindowDuration * 1000); // 秒をミリ秒に変換
-
-                    //eegResolutionNumeric.Value = (decimal)(settings.TimeResolution * 1000); // 秒をミリ秒に変換
                     interpolationCheckBox.Checked = settings.EnableInterpolation;
                     dcRemovalCheckBox.Checked = settings.EnableDcRemoval;
                 }
@@ -1688,8 +1790,8 @@ namespace ホ号計画
                 {
                     timeMinNumeric.Value = (decimal)settings.MinTime;
                     timeMaxNumeric.Value = (decimal)settings.MaxTime;
-                    freqMinNumeric.Value = (decimal)settings.DisplayMinFreq;
-                    freqMaxNumeric.Value = (decimal)Math.Min(settings.DisplayMaxFreq, 20.0); // 心拍は最大20Hzまで
+                    SetFreqNumericFromHz(freqMinNumeric, settings.DisplayMinFreq);
+                    SetFreqNumericFromHz(freqMaxNumeric, Math.Min(settings.DisplayMaxFreq, 20.0));
 
                     interpolationCheckBox.Checked = settings.EnableInterpolation;
                     dcRemovalCheckBox.Checked = settings.EnableDcRemoval;
@@ -2592,8 +2694,8 @@ namespace ホ号計画
         private void ApplyChickHeartRateSettings()
         {
             // HF設定 (1.2-0.4Hz)
-            SetNumericValueProgrammatically(freqMinNumeric, 0.4m);
-            SetNumericValueProgrammatically(freqMaxNumeric, 1.2m);
+            SetFreqNumericFromHz(freqMinNumeric, 0.4);
+            SetFreqNumericFromHz(freqMaxNumeric, 1.2);
 
             System.Diagnostics.Debug.WriteLine("ひよこモード心拍設定適用: HF=0.4-1.2Hz");
 
@@ -2608,8 +2710,8 @@ namespace ホ号計画
         private void ApplyHumanHeartRateSettings()
         {
             // HF設定 (0.4-0.15Hz)
-            SetNumericValueProgrammatically(freqMinNumeric, 0.15m);
-            SetNumericValueProgrammatically(freqMaxNumeric, 0.4m);
+            SetFreqNumericFromHz(freqMinNumeric, 0.15);
+            SetFreqNumericFromHz(freqMaxNumeric, 0.4);
 
             System.Diagnostics.Debug.WriteLine("人間モード心拍設定適用: HF=0.15-0.4Hz");
 

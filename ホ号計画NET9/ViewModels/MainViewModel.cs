@@ -436,9 +436,9 @@ namespace ホ号計画.ViewModels
             if (!SpectrogramPlot.Axes.Any(a => a.Key == "TimeAxis"))
                 SpectrogramPlot.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, Title = "時間 (秒)", Key = "TimeAxis" });
 
-            // FrequencyAxis がなければ追加
+            // FrequencyAxis がなければ追加（対数スケール設定を考慮）
             if (!SpectrogramPlot.Axes.Any(a => a.Key == "FrequencyAxis"))
-                SpectrogramPlot.Axes.Add(new LinearAxis { Position = AxisPosition.Left, Title = "周波数 (Hz)", Key = "FrequencyAxis" });
+                ReplaceFrequencyAxis(isLog: _isLogScale);
 
             // ColorAxis がなければ追加
             if (!SpectrogramPlot.Axes.Any(a => a.Key == "HeatmapColors"))
@@ -575,6 +575,15 @@ namespace ホ号計画.ViewModels
                     : 1.0;
                 double y0 = actualMinFreq + freqBinWidth / 2.0;
                 double y1 = actualMaxFreq + freqBinWidth / 2.0;
+
+                // 対数スケール時は LinearAxis + log10 座標変換方式のため Y0/Y1 を log10 変換
+                if (_isLogScale)
+                {
+                    double safeY0 = Math.Max(y0, GetFrequencyResolution());
+                    double safeY1 = Math.Max(y1, safeY0 * 2);
+                    y0 = Math.Log10(safeY0);
+                    y1 = Math.Log10(safeY1);
+                }
                 
                 // 描画安全性の包括的チェック
                 if (!IsValidHeatMapCoordinates(x0, x1, y0, y1))
@@ -603,19 +612,66 @@ namespace ホ号計画.ViewModels
                 foreach (var ax in SpectrogramPlot.Axes)
                     System.Diagnostics.Debug.WriteLine($"[AxesDiag]   Key={(ax.Key ?? "(null)")}, Pos={ax.Position}");
 
+                // HeatMapSeries座標を軸範囲にクリップ（OverflowException防止）
+                var clipFreqAxis = SpectrogramPlot.Axes.FirstOrDefault(a => a.Key == "FrequencyAxis");
+                var clipTimeAxis = SpectrogramPlot.Axes.FirstOrDefault(a => a.Key == "TimeAxis");
+                if (clipFreqAxis != null)
+                {
+                    double axisYMin = clipFreqAxis.Minimum;
+                    double axisYMax = clipFreqAxis.Maximum;
+
+                    // HeatMapが軸範囲と完全に重ならない場合はフォールバック
+                    if (y1 <= axisYMin || y0 >= axisYMax)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"警告: HeatMap Y範囲({y0:F4}~{y1:F4})が軸範囲({axisYMin:F4}~{axisYMax:F4})と重ならない");
+                        System.Diagnostics.Debug.WriteLine("→ 周波数分解能が表示範囲に対して粗すぎます。DFT時間幅を増やしてください。");
+                        StatusMessage = "警告: 周波数分解能が表示範囲に対して粗すぎます。DFT時間幅(秒)を増やしてください。";
+                        CreateAverageSpectrumPlot();
+                        return;
+                    }
+
+                    // 部分的に軸範囲外の場合はクリップ
+                    if (y0 < axisYMin) y0 = axisYMin;
+                    if (y1 > axisYMax) y1 = axisYMax;
+                }
+                if (clipTimeAxis != null)
+                {
+                    double axisXMin = clipTimeAxis.Minimum;
+                    double axisXMax = clipTimeAxis.Maximum;
+                    if (x0 < axisXMin) x0 = axisXMin;
+                    if (x1 > axisXMax) x1 = axisXMax;
+                }
+
+                // クリップ後の座標妥当性チェック
+                if (y1 - y0 < 1e-10 || x1 - x0 < 1e-10)
+                {
+                    System.Diagnostics.Debug.WriteLine($"警告: クリップ後の描画範囲が小さすぎます (dx={x1-x0:E2}, dy={y1-y0:E2})");
+                    StatusMessage = "警告: 表示範囲が小さすぎます。周波数範囲またはDFT時間幅を調整してください。";
+                    CreateAverageSpectrumPlot();
+                    return;
+                }
+
                 try
                 {
+                    // デバッグ: HeatMapSeries 座標値と軸範囲を出力
+                    var dbgFreqAxis = SpectrogramPlot.Axes.FirstOrDefault(a => a.Key == "FrequencyAxis");
+                    var dbgTimeAxis = SpectrogramPlot.Axes.FirstOrDefault(a => a.Key == "TimeAxis");
+                    System.Diagnostics.Debug.WriteLine($"[HeatMap] 座標: X0={x0:F4}, X1={x1:F4}, Y0={y0:F4}, Y1={y1:F4}");
+                    System.Diagnostics.Debug.WriteLine($"[HeatMap] データ: {heatMapData.GetLength(0)}x{heatMapData.GetLength(1)}");
+                    System.Diagnostics.Debug.WriteLine($"[HeatMap] 時間軸: Min={dbgTimeAxis?.Minimum:F4}, Max={dbgTimeAxis?.Maximum:F4}");
+                    System.Diagnostics.Debug.WriteLine($"[HeatMap] 周波数軸: Min={dbgFreqAxis?.Minimum:F4}, Max={dbgFreqAxis?.Maximum:F4}, Type={dbgFreqAxis?.GetType().Name}");
+                    System.Diagnostics.Debug.WriteLine($"[HeatMap] IsLogScale={_isLogScale}");
+                    System.Console.WriteLine($"[HeatMap] X0={x0:F4}, X1={x1:F4}, Y0={y0:F4}, Y1={y1:F4}, Data={heatMapData.GetLength(0)}x{heatMapData.GetLength(1)}, FreqAxisMin={dbgFreqAxis?.Minimum:F4}, FreqAxisMax={dbgFreqAxis?.Maximum:F4}");
+
                     var heatMapSeries = new HeatMapSeries
                     {
-                        X0 = x0,  // 検証済み開始時間（秒）
-                        X1 = x1,  // 検証済み終了時間（秒）
-                        Y0 = y0,  // 検証済み開始周波数（Hz）
-                        Y1 = y1,  // 検証済み終了周波数（Hz）
+                        X0 = x0,
+                        X1 = x1,
+                        Y0 = y0,
+                        Y1 = y1,
                         Data = heatMapData,
-                        Interpolate = false, // オーバーフロー防止のため補間を無効化
+                        Interpolate = false,
                         ColorAxisKey = "HeatmapColors"
-                        // XAxisKey/YAxisKey は null のまま（GetAxisOrDefault で安全に DefaultXAxis=TimeAxis を使う）
-                        // 非nullにすると OxyPlot が GetAxis()（厳格版・例外あり）を呼ぶため設定しない
                     };
 
                     SpectrogramPlot.Series.Add(heatMapSeries);
@@ -1137,15 +1193,49 @@ namespace ホ号計画.ViewModels
             // 現在の下限値を保存
             _preLogMinFreq = AnalysisSettings.DisplayMinFreq;
 
-            // 対数スケール時の下限は 0.001 (10⁻³) に固定
-            const double logDefaultMin = 0.001;
+            // 対数スケール時の下限をデータの周波数分解能から決定
+            double logDefaultMin = GetFrequencyResolution();
             _logAutoMinFreq = logDefaultMin;
 
-            // デフォルト（0.0以下）のままなら固定下限を適用
+            // デフォルト（0.0以下）のままならデータ由来の下限を適用
             if (AnalysisSettings.DisplayMinFreq <= 0.0)
                 AnalysisSettings.DisplayMinFreq = logDefaultMin;
 
             ReplaceFrequencyAxis(isLog: true);
+        }
+
+        /// <summary>
+        /// 対数スケール用の下限値を返す。
+        /// SpectrogramData があれば周波数分解能（最初の非ゼロビン）を使用し、
+        /// なければ DisplayMaxFreq の 1/100 をフォールバックとする。
+        /// </summary>
+        private double GetFrequencyResolution()
+        {
+            // データがあれば周波数分解能を使用
+            if (SpectrogramData?.FrequencyAxis != null && SpectrogramData.FrequencyAxis.Length > 1)
+            {
+                double res = SpectrogramData.FrequencyAxis[1] - SpectrogramData.FrequencyAxis[0];
+                if (res > 0) return res;
+            }
+
+            // データがない場合は表示上限の 1/100 をフォールバック
+            double maxFreq = AnalysisSettings.DisplayMaxFreq > 0 ? AnalysisSettings.DisplayMaxFreq : 40.0;
+            return maxFreq / 100.0;
+        }
+
+        /// <summary>
+        /// 整数を Unicode 上付き文字に変換（例: -2 → "⁻²"）
+        /// </summary>
+        private static string ToSuperscript(int n)
+        {
+            const string superDigits = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+            if (n == 0) return "⁰";
+            string result = "";
+            int abs = Math.Abs(n);
+            if (n < 0) result = "⁻";
+            foreach (char c in abs.ToString())
+                result += superDigits[c - '0'];
+            return result;
         }
 
         private void SwitchToLinearScale()
@@ -1163,33 +1253,38 @@ namespace ホ号計画.ViewModels
             if (oldAxis != null)
                 SpectrogramPlot.Axes.Remove(oldAxis);
 
-            Axis newAxis = isLog
-                ? (Axis)new LogarithmicAxis
+            Axis newAxis;
+            if (isLog)
+            {
+                // LogarithmicAxis は HeatMapSeries と互換性がない（GDI+ OverflowException）ため、
+                // LinearAxis + log10 座標変換で対数表示を実現する
+                double safeMin = AnalysisSettings.DisplayMinFreq > 0
+                    ? AnalysisSettings.DisplayMinFreq
+                    : GetFrequencyResolution();
+                double safeMax = Math.Max(AnalysisSettings.DisplayMaxFreq, safeMin * 2);
+
+                double logMin = Math.Log10(safeMin);
+                double logMax = Math.Log10(safeMax);
+
+                newAxis = new Log10LinearAxis
                 {
                     Position = AxisPosition.Left,
                     Title = "周波数 (Hz)",
                     Key = "FrequencyAxis",
-                    Minimum = AnalysisSettings.DisplayMinFreq,
-                    Maximum = AnalysisSettings.DisplayMaxFreq,
-                    // 1 decade ごとに大目盛り（10⁻³, 10⁻², 10⁻¹, 10⁰, …）
-                    MajorStep = 1,
-                    // 大目盛りのラベルを Unicode 上付き文字による累乗表記にする
-                    LabelFormatter = value =>
+                    Minimum = logMin,
+                    Maximum = logMax,
+                    LabelFormatter = logValue =>
                     {
-                        if (value <= 0) return "";
-                        int exp = (int)Math.Round(Math.Log10(value));
-                        string digits = "";
-                        foreach (char c in Math.Abs(exp).ToString())
-                            digits += c switch
-                            {
-                                '0' => "⁰", '1' => "¹", '2' => "²", '3' => "³",
-                                '4' => "⁴", '5' => "⁵", '6' => "⁶", '7' => "⁷",
-                                '8' => "⁸", '9' => "⁹", _ => c.ToString()
-                            };
-                        return $"10{(exp < 0 ? "⁻" : "")}{digits}";
+                        int exp = (int)Math.Round(logValue);
+                        if (Math.Abs(logValue - exp) < 0.01)
+                            return $"10{ToSuperscript(exp)}";
+                        return "";
                     }
-                }
-                : new LinearAxis
+                };
+            }
+            else
+            {
+                newAxis = new LinearAxis
                 {
                     Position = AxisPosition.Left,
                     Title = "周波数 (Hz)",
@@ -1197,6 +1292,7 @@ namespace ホ号計画.ViewModels
                     Minimum = AnalysisSettings.DisplayMinFreq,
                     Maximum = AnalysisSettings.DisplayMaxFreq
                 };
+            }
 
             SpectrogramPlot.Axes.Add(newAxis);
             SpectrogramPlot.InvalidatePlot(true);
@@ -1243,10 +1339,23 @@ namespace ホ号計画.ViewModels
             var freqAxis = SpectrogramPlot.Axes.FirstOrDefault(a => a.Key == "FrequencyAxis");
             if (freqAxis != null)
             {
-                freqAxis.Minimum = freqMin;
-                freqAxis.Maximum = freqMax;
-                double safeFreqMin = (_isLogScale && freqMin <= 0) ? _logAutoMinFreq : freqMin;
-                freqAxis.Zoom(safeFreqMin, freqMax);
+                if (_isLogScale)
+                {
+                    // 対数スケール: LinearAxis + log10 座標変換方式
+                    double safeMin = (freqMin > 0) ? freqMin : GetFrequencyResolution();
+                    double safeMax = Math.Max(freqMax, safeMin * 2);
+                    double logMin = Math.Log10(safeMin);
+                    double logMax = Math.Log10(safeMax);
+                    freqAxis.Minimum = logMin;
+                    freqAxis.Maximum = logMax;
+                    freqAxis.Zoom(logMin, logMax);
+                }
+                else
+                {
+                    freqAxis.Minimum = freqMin;
+                    freqAxis.Maximum = freqMax;
+                    freqAxis.Zoom(freqMin, freqMax);
+                }
             }
         }
 
@@ -2114,6 +2223,43 @@ namespace ホ号計画.ViewModels
             
             System.Diagnostics.Debug.WriteLine($"時間解像度最適化: {AnalysisSettings.TimeResolution:F6}秒 (ホップサイズ: {targetHopSize})");
             System.Diagnostics.Debug.WriteLine($"=== 自動設定完了 ===");
+        }
+    }
+
+    /// <summary>
+    /// log10 座標空間上で対数的な目盛りを生成する LinearAxis サブクラス。
+    /// 大目盛り: 10 の整数乗（10⁰, 10¹, 10², ...）
+    /// 小目盛り: 各 decade 内の 2,3,4,5,6,7,8,9 の位置（間隔が徐々に狭まる）
+    /// </summary>
+    public class Log10LinearAxis : LinearAxis
+    {
+        public override void GetTickValues(
+            out IList<double> majorLabelValues,
+            out IList<double> majorTickValues,
+            out IList<double> minorTickValues)
+        {
+            majorLabelValues = new List<double>();
+            majorTickValues = new List<double>();
+            minorTickValues = new List<double>();
+
+            int startDecade = (int)Math.Floor(ActualMinimum);
+            int endDecade = (int)Math.Ceiling(ActualMaximum);
+
+            for (int decade = startDecade; decade <= endDecade; decade++)
+            {
+                if (decade >= ActualMinimum && decade <= ActualMaximum)
+                {
+                    majorLabelValues.Add(decade);
+                    majorTickValues.Add(decade);
+                }
+
+                for (int k = 2; k <= 9; k++)
+                {
+                    double minorPos = decade + Math.Log10(k);
+                    if (minorPos >= ActualMinimum && minorPos <= ActualMaximum)
+                        minorTickValues.Add(minorPos);
+                }
+            }
         }
     }
 }
