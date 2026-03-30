@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe build)",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Student\\\\source\\\\repos\\\\ホ号計画NET9 && dotnet build\")",
+      "Bash(cmd.exe /c \"dotnet build\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Student\\\\source\\\\repos\\\\ホ号計画NET9 && dotnet build --nologo -v q\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Student\\\\source\\\\repos\\\\ホ号計画NET9 && dotnet build --nologo -v q 2>&1 | tail -5\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Users\\\\Student\\\\source\\\\repos\\\\ホ号計画NET9 && dotnet build --nologo 2>&1\")",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe build --nologo)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe build --no-restore)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build \"/mnt/c/Users/Student/source/repos/ホ号計画NET9/ホ号計画NET9/ホ号計画NET9.csproj\" --no-restore)",
+      "Bash(cmd.exe:*)",
+      "Bash(export PATH=\"$PATH:/mnt/c/Program Files/dotnet\")",
+      "Bash(dotnet.exe build:*)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build \"/mnt/c/Users/Student/source/repos/ホ号計画NET9\" --nologo)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build --nologo)",
+      "Bash(grep:*)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build --no-restore)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe build:*)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build \"ホ号計画NET9.sln\")",
+      "Bash(tail:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(cp:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(unzip:*)",
+      "Bash(dotnet:*)",
+      "Bash(apt-cache search:*)",
+      "Bash(curl:*)",
+      "Bash(find:*)"
+    ]
+  }
+}
