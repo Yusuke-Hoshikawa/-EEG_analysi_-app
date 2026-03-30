@@ -35,7 +35,10 @@
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build:*)",
       "Bash(export:*)",
       "Bash(du -sh /mnt/c/Users/Student/source/repos/ホ号計画NET9/*/)",
-      "Bash(xargs -d n du -ch)"
+      "Bash(xargs -d n du -ch)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
